@@ -29,7 +29,7 @@ struct SEMAPHORE {
 
 void waitsem(struct SEMAPHORE *);
 void signalsem(struct SEMAPHORE *);
-void initsem(struct SEMAPHORE *);
+void initsem(struct SEMAPHORE *, int conta);
 
 void proceso(int i)
 	{
@@ -83,7 +83,7 @@ void main(){
 		perror("Error en el shmat\n");
 		exit(2);
 	}
-	
+	initsem(s,1);
 	//--------------------------------------main stuff------------------------------------------------------
 	int i;
 	int pid;
@@ -147,7 +147,7 @@ void signalsem(struct SEMAPHORE *sema){
 	*g=0;
 }
 
-void initsem(struct SEMEPHORE *sema){
-	sema->contador = 1;
+void initsem(struct SEMEPHORE *sema, int conta){
+	sema->contador = conta;
 	sema->cola = NULL;
 }
