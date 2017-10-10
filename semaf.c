@@ -44,9 +44,17 @@ void main(){
 }
 
 void waitsem(struct SEMAPHORE *sema){
-	sema->
+	sema->contador--;
+	if(sema->contador < 0){
+		//poner id de proceso en cola de bloqueado
+		//bloquear proceso
+	}
 }
 
-void waitsem(struct SEMAPHORE sema){
-		
+void signalsem(struct SEMAPHORE sema){
+	sema->contador++;
+	if(sema->contador <= 0){
+		//quitar un id de la cola
+		//desbloquear ese id
+	}
 }
