@@ -29,6 +29,7 @@ struct SEMAPHORE {
 
 void waitsem(struct SEMAPHORE *);
 void signalsem(struct SEMAPHORE *);
+void initsem(struct SEMAPHORE *);
 
 void proceso(int i)
 	{
@@ -144,4 +145,9 @@ void signalsem(struct SEMAPHORE *sema){
 		kill(id, SIGCONT);
 	}
 	*g=0;
+}
+
+void initsem(struct SEMEPHORE *sema){
+	sema->contador = 1;
+	sema->cola = NULL;
 }
