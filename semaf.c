@@ -4,7 +4,6 @@
 #include <signal.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
-#include <sys/queue.h>
 
 #define atomic_xchg(A,B)		__asm__ __volatile__(	\
 											"	lock xchg %1, %0 ;\n"	\
@@ -12,17 +11,45 @@
 											: "m"	(B), "ir"	(A)		\
 											);
 #define CICLOS 10
+#define MAXTHREAD 10
+
 char *pais[3]={"Peru","Bolvia","Colombia"};
 int *g;
 
-struct queue{
-	int id;
-	TAILQ_ENTRY(queue) entries;		
-};
+//-----------------------------	QUEUE y funciones ---------------------------------------
 
-struct SEMAPHORE {
-	int contador;
-	TAILQ_HEAD (,queue) cola;
+typedef struct _QUEUE {
+	int elements[MAXTHREAD];
+	int head;
+	int tail;
+} QUEUE;
+
+void _initqueue(QUEUE *q)
+{
+	q->head=0;
+	q->tail=0;
+}
+
+void _enqueue(QUEUE *q,int val){
+    q->elements[q->head]=val;
+	// Incrementa al apuntador
+	q->head++;
+	q->head=q->head%MAXTHREAD;
+}
+int _dequeue(QUEUE *q){
+    int valret;
+	valret=q->elements[q->tail];
+	// Incrementa al apuntador
+	q->tail++;
+	q->tail=q->tail%MAXTHREAD;
+	return(valret);
+}
+
+//------------------------ FIN DE QUEUE -------------------------------------
+
+struct SEMAPHORE {					//estructura del semaforo, contador y cola
+	int contador;					//es un apuntador a estructura para que se utilice
+	QUEUE cola;		//con memoria compartida
 } *s;
 
 
@@ -31,7 +58,7 @@ void waitsem(struct SEMAPHORE *);
 void signalsem(struct SEMAPHORE *);
 void initsem(struct SEMAPHORE *);
 
-void proceso(int i)
+void proceso(int i)					//Funcion de ferrocarriles
 	{
 		int l;
 		int k;
@@ -39,26 +66,16 @@ void proceso(int i)
 		{
 			//printf("Hola\n");
 			// Llamada waitsem implementada en la parte 3
-			//l = 1;
-			//do { atomic_xchg(l,*g); } while(l!=0);
 			
 			waitsem(s);
-			
-			l = 1;
-			*g = 0;
 			
 			printf("Entra %s ",pais[i]);
 			fflush(stdout);
 			sleep(rand()%3);
 			printf("- %s Sale\n",pais[i]);
 			// Llamada waitsignal implementada en la parte 3
-			//l = 1;
-			//do { atomic_xchg(l,*g); } while(l!=0);
 			
 			signalsem(s);
-			
-			l = 1;
-			*g = 0;
 			
 			// Espera aleatoria fuera de la sección crítica
 			sleep(rand()%3);
@@ -69,14 +86,14 @@ void proceso(int i)
 
 void main(){
 	//--------------------------------------primera direccion de memoria compartida---------------------------
-	int shmid = shmget(0x1234,sizeof(s),0666|IPC_CREAT);
+	int shmid = shmget(IPC_PRIVATE,sizeof(s),0666|IPC_CREAT);
 	if(shmid==-1)
 	{
 		perror("Error en la memoria compartida\n");
 		exit(1);
 	}
 	
-	s = shmat(shmid,NULL,0);
+	s = (struct SEMAPHORE*)shmat(shmid,NULL,0);
 	
 	if(s==NULL)
 	{
@@ -85,7 +102,7 @@ void main(){
 	}
 	//--------------------------------------segunda direccion de memoria compartida---------------------------
 	
-	int shmid2 = shmget(0x1235,sizeof(g),0666|IPC_CREAT);
+	int shmid2 = shmget(IPC_PRIVATE,sizeof(g),0666|IPC_CREAT);
 	if(shmid2==-1)
 	{
 		perror("Error en la memoria compartida\n");
@@ -102,7 +119,7 @@ void main(){
 		exit(2);
 	}
 	
-	//--------------------------------------main stuff------------------------------------------------------
+	//--------------------------------------inicio------------------------------------------------------
 	int i;
 	int pid;
 	int status;
@@ -118,45 +135,28 @@ void main(){
 	for(i=0;i<3;i++)
 		pid = wait(&status);
 	
-	//----------------------------------END OF THE LINE BOY--------------------------------
+	//---------------------------------- fin de uso de memoria compartida --------------------------------
 	shmdt(s);
 	shmdt(g);
 }
 
-void initsem(struct SEMAPHORE *sema){
-	printf("Hola\n");
+void initsem(struct SEMAPHORE *sema){	//paso por referencia del semaforo
 	int l = 1;
-	do { atomic_xchg(l,*g);
-	   printf("stuck in init\n");
-	   } while(l!=0);
-	sema->contador = 1;
-	TAILQ_INIT(&sema->cola);
+	do { atomic_xchg(l,*g);} while(l!=0);//solucion de concurrencia por hardware
+	sema->contador = 1;					//se inicia contador en 1
+	_initqueue(&sema->cola);			//se inicia cola
 	*g=0;
 }
 
 void waitsem(struct SEMAPHORE *sema){
-	int l = 1;
-	struct queue *item;
-	do { atomic_xchg(l,*g);
-	   printf("stuck in wait\n");
-	   } while(l!=0);
-	sema->contador--;//	
-	printf("Pid: %d\n", getpid());
-	printf("Contador sem: %d\n", sema->contador);
-	if(sema->contador < 0){
+	int l = 1;	
+	do { atomic_xchg(l,*g);} while(l!=0);//solucion de concurrencia por hardware
+	sema->contador--;					//se decrementa el contador, si es menor a 0
+	if(sema->contador < 0){				//manda el id del proceso a la cola y bloquea
 		//poner id de proceso en cola de bloqueado
-		
-		item = malloc(sizeof(*item));
-		if (item == NULL) {
-			perror("malloc failed");
-			exit(EXIT_FAILURE);
-		}
-		item->id = getpid();
-		TAILQ_INSERT_TAIL(&sema->cola, item, entries);
+		_enqueue(&sema->cola, getpid());
 		*g=0;
-		
 		//bloquear proceso
-		printf("Pid: %d", getpid());
 		kill(getpid(), SIGSTOP);
 		//se puede agregar comprobacion	
 	}
@@ -165,25 +165,15 @@ void waitsem(struct SEMAPHORE *sema){
 
 void signalsem(struct SEMAPHORE *sema){
 	int l = 1;
-	struct queue *item;
 	int id;
-	do { atomic_xchg(l,*g);
-	   printf("stuck in signal, pid: %d\n", getpid());
-	   } while(l!=0);
-	printf("Contador sem: %d, pid: %d\n", sema->contador, getpid());
-	sema->contador++;
-	printf("Contador sem: %d, pid: %d\n", sema->contador, getpid());
-	if(sema->contador <= 0){
-		printf("Entra a condicion en signal");
+	do { atomic_xchg(l,*g);} while(l!=0);//solucion de concurrencia por hardware
+	
+	sema->contador++;					//se incrementa contador, si es menor o igual a 0
+	if(sema->contador <= 0){			//se quita un id de la cola y se continua proceso con tal id
 		//quitar un id de la cola
-		item = TAILQ_FIRST(&sema->cola);
-		id = item->id;
-		TAILQ_REMOVE(&sema->cola, item, entries);
-		free(item);
+		id = _dequeue(&sema->cola);
 		//desbloquear ese id
-		printf("%d\n",id);
 		kill(id, SIGCONT);
 	}
-	printf("No entra a condicion en signal");
 	*g=0;
 }
